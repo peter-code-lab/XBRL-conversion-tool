@@ -1,0 +1,49 @@
+{
+  "taxonomy_name": "construction_payment_application",
+  "version": "0.1.0",
+  "description": "Bespoke, minimal taxonomy scoped to the PoC's 4 target fields. Not derived from any published standard yet — the AIA G702/G703 construction-billing forms are an unconfirmed but promising lead for a future, fuller version of this taxonomy.",
+  "concepts": {
+    "AgreementParties": {
+      "type": "group",
+      "label": "Agreement Parties"
+    },
+    "PrimeContractor": {
+      "type": "string",
+      "label": "Prime Contractor",
+      "parent": "AgreementParties"
+    },
+    "ApplicationForPaymentSummary": {
+      "type": "group",
+      "label": "Application for Payment - Summary"
+    },
+    "ApplicationForPaymentNumber": {
+      "type": "string",
+      "label": "Application for Payment Number",
+      "parent": "ApplicationForPaymentSummary"
+    },
+    "ApplicationForPaymentDate": {
+      "type": "date",
+      "label": "Application for Payment Date",
+      "parent": "ApplicationForPaymentSummary"
+    },
+    "WorkCompletedThisApplication": {
+      "type": "monetary",
+      "label": "Work Completed This Application",
+      "parent": "ApplicationForPaymentSummary"
+    }
+  },
+  "presentation_linkbase": [
+    {"parent": null, "concept": "AgreementParties", "order": 1},
+    {"parent": "AgreementParties", "concept": "PrimeContractor", "order": 1},
+    {"parent": null, "concept": "ApplicationForPaymentSummary", "order": 2},
+    {"parent": "ApplicationForPaymentSummary", "concept": "ApplicationForPaymentNumber", "order": 1},
+    {"parent": "ApplicationForPaymentSummary", "concept": "ApplicationForPaymentDate", "order": 2},
+    {"parent": "ApplicationForPaymentSummary", "concept": "WorkCompletedThisApplication", "order": 3}
+  ],
+  "extraction_field_map": {
+    "agreement_parties.prime_contractor": "PrimeContractor",
+    "application_for_payment_summary.application_for_payment_number": "ApplicationForPaymentNumber",
+    "application_for_payment_summary.application_for_payment_date": "ApplicationForPaymentDate",
+    "application_for_payment_summary.work_completed_this_application": "WorkCompletedThisApplication"
+  }
+}
