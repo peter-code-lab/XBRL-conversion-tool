@@ -96,7 +96,11 @@ class PipelineConfig:
     runs_dir: Path = field(default_factory=lambda: _project_root() / "runs")
     review_log_path: Path = field(default_factory=lambda: _project_root() / "runs" / "review_log.jsonl")
     candidates_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "candidates")
+    # Every run's final tagged XBRL-shaped output, one file per extraction —
+    # previously only printed to stdout and not persisted anywhere.
+    extractions_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "extractions")
 
     def __post_init__(self) -> None:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_dir.mkdir(parents=True, exist_ok=True)
+        self.extractions_dir.mkdir(parents=True, exist_ok=True)

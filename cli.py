@@ -15,6 +15,7 @@ import glob as globmod
 import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import review_log
@@ -49,7 +50,17 @@ def cmd_run(args: argparse.Namespace, config: PipelineConfig) -> None:
     review_log.append(config.review_log_path, pdf_path, review, ai_reviews=ai_reviews)
 
     tagged = tagger.tag(result.extraction, source_document=str(pdf_path))
-    print(json.dumps(tagged.to_dict(), indent=2, ensure_ascii=False, default=str))
+    tagged_dict = tagged.to_dict()
+    print(json.dumps(tagged_dict, indent=2, ensure_ascii=False, default=str))
+
+    # Persist every extraction's tagged output, timestamped so re-running the
+    # same PDF accumulates history rather than overwriting the prior result —
+    # previously this was only printed to stdout and lost once the terminal
+    # scrolled past it.
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    out_path = config.extractions_dir / f"{ts}_{pdf_path.stem}.json"
+    out_path.write_text(json.dumps(tagged_dict, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    print(f"\nExtraction saved: {out_path}", file=sys.stderr)
 
     flagged = review.flag_worthy()
     if flagged:
