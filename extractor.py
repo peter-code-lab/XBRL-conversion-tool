@@ -172,27 +172,36 @@ class Extractor:
 
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:
-        """Parse Gemini's response into a single dict.
+        """Parse Gemini's response into a single dict with value fields plus
+        a top-level "confidence" key.
 
-        Despite the prompt asking for one JSON object with value fields plus
-        a top-level "confidence" key, weaker/cheaper models (observed with
-        gemini-2.5-flash-lite on the first live run) sometimes emit two
-        separate fenced JSON blocks instead — one value object, one
-        `{"confidence": {...}}` object. Strip all code fences, then decode
-        every top-level JSON value found in sequence and merge them, so both
-        the intended single-object shape and this two-object variant work.
+        The prompt asks for one JSON object shaped that way, but cheaper
+        models are inconsistent in practice — two distinct malformed shapes
+        observed across the first two live test runs on gemini-2.5-flash-lite:
+
+          1. Two fenced blocks: the value object, then a separate
+             `{"confidence": {...}}` object.
+          2. Two fenced blocks: the value object, then a SECOND full copy of
+             the same schema shape with each leaf's plain value replaced by
+             a `{confidence, evidence_text, page}` dict — no "confidence"
+             wrapper key at all.
+
+        A naive `dict.update()` merge across all top-level objects handles
+        case 1 correctly but silently destroys the real values in case 2
+        (the second object's top-level keys collide with and overwrite the
+        first object's). So: parse every top-level JSON value in the
+        response, classify each one as a "confidence tree" (every leaf is a
+        confidence-shaped dict, no plain scalar values anywhere) or a "value
+        object" (has at least one real scalar leaf), and combine accordingly
+        instead of blindly overwriting.
         """
-        # Drop every ``` / ```json fence, not just the first — there can be
-        # more than one block.
         cleaned = re.sub(r"```(?:json)?", "", text).strip()
 
         decoder = json.JSONDecoder()
-        merged: Dict[str, Any] = {}
+        parsed_objects: List[Dict[str, Any]] = []
         idx = 0
         n = len(cleaned)
-        found_any = False
         while idx < n:
-            # Skip whitespace between JSON values.
             while idx < n and cleaned[idx] in " \t\r\n":
                 idx += 1
             if idx >= n:
@@ -202,13 +211,42 @@ class Extractor:
             except json.JSONDecodeError:
                 break
             if isinstance(obj, dict):
-                merged.update(obj)
-                found_any = True
+                parsed_objects.append(obj)
             idx = end
 
-        if not found_any:
+        if not parsed_objects:
             raise ExtractorError(f"Could not parse any JSON object from Gemini response: {text[:300]!r}")
+
+        merged: Dict[str, Any] = {}
+        confidence_tree: Optional[Dict[str, Any]] = None
+        for obj in parsed_objects:
+            if Extractor._is_pure_confidence_tree(obj):
+                # Unwrap a `{"confidence": {...}}` wrapper if that's all this
+                # object is; otherwise the object itself IS the tree (case 2).
+                confidence_tree = obj["confidence"] if list(obj.keys()) == ["confidence"] else obj
+            else:
+                merged.update(obj)
+
+        if confidence_tree is not None:
+            merged["confidence"] = confidence_tree
         return merged
+
+    @staticmethod
+    def _is_pure_confidence_tree(node: Any) -> bool:
+        """True if every leaf in this JSON value is a confidence-shaped dict
+        (has a scalar "confidence" key) — i.e. there are NO plain scalar
+        values anywhere, so this can't be (part of) the real value object."""
+        if isinstance(node, dict):
+            if "confidence" in node and not isinstance(node.get("confidence"), (dict, list)):
+                return True
+            if not node:
+                return False
+            return all(Extractor._is_pure_confidence_tree(v) for v in node.values())
+        if isinstance(node, list):
+            if not node:
+                return False
+            return all(Extractor._is_pure_confidence_tree(v) for v in node)
+        return False
 
     # ------------------------------------------------------------------
     # Bbox verification — adapted from SBI_Backend/.../auto_bbox.py, generalized
