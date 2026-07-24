@@ -172,20 +172,43 @@ class Extractor:
 
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:
-        text = text.strip()
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError:
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            if not m:
-                raise
-            obj = json.loads(m.group(0))
-        if not isinstance(obj, dict):
-            raise ExtractorError("Expected a JSON object from Gemini")
-        return obj
+        """Parse Gemini's response into a single dict.
+
+        Despite the prompt asking for one JSON object with value fields plus
+        a top-level "confidence" key, weaker/cheaper models (observed with
+        gemini-2.5-flash-lite on the first live run) sometimes emit two
+        separate fenced JSON blocks instead — one value object, one
+        `{"confidence": {...}}` object. Strip all code fences, then decode
+        every top-level JSON value found in sequence and merge them, so both
+        the intended single-object shape and this two-object variant work.
+        """
+        # Drop every ``` / ```json fence, not just the first — there can be
+        # more than one block.
+        cleaned = re.sub(r"```(?:json)?", "", text).strip()
+
+        decoder = json.JSONDecoder()
+        merged: Dict[str, Any] = {}
+        idx = 0
+        n = len(cleaned)
+        found_any = False
+        while idx < n:
+            # Skip whitespace between JSON values.
+            while idx < n and cleaned[idx] in " \t\r\n":
+                idx += 1
+            if idx >= n:
+                break
+            try:
+                obj, end = decoder.raw_decode(cleaned, idx)
+            except json.JSONDecodeError:
+                break
+            if isinstance(obj, dict):
+                merged.update(obj)
+                found_any = True
+            idx = end
+
+        if not found_any:
+            raise ExtractorError(f"Could not parse any JSON object from Gemini response: {text[:300]!r}")
+        return merged
 
     # ------------------------------------------------------------------
     # Bbox verification — adapted from SBI_Backend/.../auto_bbox.py, generalized
