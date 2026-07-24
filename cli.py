@@ -47,9 +47,15 @@ def cmd_run(args: argparse.Namespace, config: PipelineConfig) -> None:
         ai_reviewer = AIReviewer(config)
         ai_reviews = ai_reviewer.critique_document(pdf_path, rules_text, review)
 
-    review_log.append(config.review_log_path, pdf_path, review, ai_reviews=ai_reviews)
+    review_log.append(
+        config.review_log_path, pdf_path, review, ai_reviews=ai_reviews,
+        extraction_model=config.extraction_model, bbox_model=config.bbox_model,
+    )
 
-    tagged = tagger.tag(result.extraction, source_document=str(pdf_path))
+    tagged = tagger.tag(
+        result.extraction, source_document=str(pdf_path),
+        extraction_model=config.extraction_model, bbox_model=config.bbox_model,
+    )
     tagged_dict = tagged.to_dict()
     print(json.dumps(tagged_dict, indent=2, ensure_ascii=False, default=str))
 

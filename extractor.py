@@ -284,9 +284,17 @@ class Extractor:
                 page = doc[page_num - 1]
                 try:
                     img_bytes = self._render_page(page)
-                    boxes = self._call_bbox_gemini(img_bytes, items)
+                    boxes = self._call_bbox_gemini_with_retry(img_bytes, items, page_num, pdf_path)
                 except Exception as exc:
-                    logger.warning("Bbox Gemini call failed for page %d of %s: %s", page_num, pdf_path, exc)
+                    # Only reached after retries are exhausted. Marking NO_MATCH
+                    # here is a fallback, not a genuine "checked and it's not
+                    # there" result -- log the full exception so a persistent
+                    # failure is actually diagnosable instead of silently
+                    # looking identical to a real suspicious-field finding.
+                    logger.warning(
+                        "Bbox verification failed for page %d of %s after retries: %s",
+                        page_num, pdf_path, exc, exc_info=True,
+                    )
                     for _, _, leaf in items:
                         leaf["alignment_status"] = "NO_MATCH"
                     continue
@@ -330,6 +338,35 @@ class Extractor:
         mat = fitz.Matrix(_RENDER_DPI / 72, _RENDER_DPI / 72)
         pix = page.get_pixmap(matrix=mat, alpha=False)
         return pix.tobytes("png")
+
+    def _call_bbox_gemini_with_retry(
+        self,
+        img_bytes: bytes,
+        items: List[Tuple[str, str, Dict[str, Any]]],
+        page_num: int,
+        pdf_path: Path,
+        max_attempts: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Retry the bbox call on transient failures (network hiccups, rate
+        limits, occasional malformed JSON) before giving up. Added after
+        observing the same document produce all-EXACT on some runs and
+        all-NO_MATCH on others -- an all-or-nothing failure pattern across
+        every field on a page is a sign the whole call errored out, not that
+        the vision model individually struggled to find each piece of text.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._call_bbox_gemini(img_bytes, items)
+            except Exception as exc:  # noqa: BLE001 -- retry on anything, let the caller's handler log the final one
+                last_exc = exc
+                if attempt < max_attempts:
+                    logger.info(
+                        "Bbox call attempt %d/%d failed for page %d of %s: %s -- retrying",
+                        attempt, max_attempts, page_num, pdf_path, exc,
+                    )
+                    time.sleep(1.5 * attempt)
+        raise last_exc  # type: ignore[misc]
 
     def _call_bbox_gemini(self, img_bytes: bytes, items: List[Tuple[str, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
         items_payload = [{"label": label, "evidence_text": ev} for label, ev, _ in items]

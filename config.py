@@ -45,27 +45,22 @@ def _load_api_key() -> Optional[str]:
 
 @dataclass
 class PipelineConfig:
-    # Gemini models — set to the cheapest currently-active model
-    # (gemini-2.5-flash-lite: $0.10/1M input, $0.40/1M output as of July 2026)
-    # for all four roles while we're validating the pipeline mechanically
-    # works. Verified 2026-07-23 to actually respond for the configured key
-    # (several other listed model names 404 despite showing up in
-    # client.models.list()). NOTE: bbox/critic/proposer reasoning quality may
-    # suffer at this tier relative to a pro-tier model — revisit once
-    # correctness, not cost, is the priority. gemini-2.5-flash-lite retires
-    # 2026-10-16; gemini-3.1-flash-lite ($0.25/$1.50) is the next-cheapest
-    # option after that.
+    # Gemini models — switched 2026-07-24 from gemini-2.5-flash-lite to
+    # gemini-3.5-flash-lite for all four roles, to test whether a newer
+    # lite-tier model handles harder/denser documents better (see the
+    # 07-235504-001.pdf hallucination investigation) without jumping all the
+    # way to pro-tier pricing. Verified working live against the current key.
     extraction_model: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_EXTRACTION_MODEL", "gemini-2.5-flash-lite")
+        default_factory=lambda: os.environ.get("GEMINI_EXTRACTION_MODEL", "gemini-3.5-flash-lite")
     )
     bbox_model: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_BBOX_MODEL", "gemini-2.5-flash-lite")
+        default_factory=lambda: os.environ.get("GEMINI_BBOX_MODEL", "gemini-3.5-flash-lite")
     )
     proposer_model: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_PROPOSER_MODEL", "gemini-2.5-flash-lite")
+        default_factory=lambda: os.environ.get("GEMINI_PROPOSER_MODEL", "gemini-3.5-flash-lite")
     )
     ai_reviewer_model: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_CRITIC_MODEL", "gemini-2.5-flash-lite")
+        default_factory=lambda: os.environ.get("GEMINI_CRITIC_MODEL", "gemini-3.5-flash-lite")
     )
     gemini_api_key: Optional[str] = field(default_factory=_load_api_key)
 

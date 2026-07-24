@@ -36,6 +36,8 @@ class TaggedDocument:
     taxonomy_name: str
     taxonomy_version: str
     source_document: str
+    extraction_model: Optional[str] = None
+    bbox_model: Optional[str] = None
     facts: List[TaggedFact] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -43,6 +45,8 @@ class TaggedDocument:
             "taxonomy_name": self.taxonomy_name,
             "taxonomy_version": self.taxonomy_version,
             "source_document": self.source_document,
+            "extraction_model": self.extraction_model,
+            "bbox_model": self.bbox_model,
             "facts": [asdict(f) for f in self.facts],
         }
 
@@ -53,11 +57,23 @@ class TaxonomyTagger:
         self.concepts: Dict[str, Any] = self.taxonomy.get("concepts", {})
         self.field_map: Dict[str, str] = self.taxonomy.get("extraction_field_map", {})
 
-    def tag(self, extraction: Dict[str, Any], source_document: str) -> TaggedDocument:
+    def tag(
+        self,
+        extraction: Dict[str, Any],
+        source_document: str,
+        extraction_model: Optional[str] = None,
+        bbox_model: Optional[str] = None,
+    ) -> TaggedDocument:
         """Walk the extractor's value JSON (not the parallel `confidence` block)
         and, for every leaf whose field path is registered in the taxonomy's
         extraction_field_map, emit a TaggedFact carrying its concept + parent
         concept per the Presentation Linkbase.
+
+        extraction_model / bbox_model are recorded on the output so a saved
+        result can always be traced back to which model produced it -- this
+        matters in practice now that we've been actively switching models
+        (2.5-flash-lite -> 3.5-flash-lite) mid-investigation and need to know
+        which run used which.
         """
         confidence_block = extraction.get("confidence") if isinstance(extraction.get("confidence"), dict) else {}
         value_block = {k: v for k, v in extraction.items() if k != "confidence"}
@@ -69,6 +85,8 @@ class TaxonomyTagger:
             taxonomy_name=self.taxonomy.get("taxonomy_name", "unknown"),
             taxonomy_version=self.taxonomy.get("version", "0.0.0"),
             source_document=source_document,
+            extraction_model=extraction_model,
+            bbox_model=bbox_model,
             facts=facts,
         )
 

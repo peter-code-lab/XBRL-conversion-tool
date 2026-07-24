@@ -19,7 +19,14 @@ from reviewer import ReviewOutput
 logger = logging.getLogger(__name__)
 
 
-def append(log_path: Path, pdf_path: Path, review: ReviewOutput, ai_reviews: Optional[List[Any]] = None) -> None:
+def append(
+    log_path: Path,
+    pdf_path: Path,
+    review: ReviewOutput,
+    ai_reviews: Optional[List[Any]] = None,
+    extraction_model: Optional[str] = None,
+    bbox_model: Optional[str] = None,
+) -> None:
     judgments = [asdict(j) for j in review.judgments]
     if ai_reviews:
         by_field: Dict[str, Any] = {}
@@ -33,10 +40,15 @@ def append(log_path: Path, pdf_path: Path, review: ReviewOutput, ai_reviews: Opt
             if ai:
                 j["ai_review"] = ai
 
+    # extraction_model / bbox_model recorded per entry so past log lines can
+    # always be traced back to which model version produced them -- added
+    # after we started actively switching models mid-investigation.
     entry = {
         "ts": datetime.utcnow().isoformat() + "Z",
         "pdf": str(pdf_path),
         "document_id": review.document_id,
+        "extraction_model": extraction_model,
+        "bbox_model": bbox_model,
         "judgments": judgments,
     }
     log_path.parent.mkdir(parents=True, exist_ok=True)
