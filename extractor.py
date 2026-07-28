@@ -22,6 +22,7 @@ import logging
 import re
 import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -138,6 +139,11 @@ class Extractor:
         if not pdf_path.exists():
             raise FileNotFoundError(pdf_path)
 
+        # One id shared by every raw response saved for this document's run
+        # (extraction + every per-page bbox call), so they can all be found
+        # and correlated together afterward.
+        run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{pdf_path.stem}"
+
         start = time.time()
         remote_file = self._upload(pdf_path)
         prompt = self.config.prompt_path.read_text(encoding="utf-8") + CONFIDENCE_PROMPT_SUFFIX
@@ -148,14 +154,27 @@ class Extractor:
             config=types.GenerateContentConfig(temperature=0.0, top_p=0.0),
         )
         raw = (response.text or "").strip()
+        self._save_raw_response(run_id, "extraction", raw)
         if not raw:
             raise ExtractorError(f"Empty response from Gemini for {pdf_path}")
 
         extraction = self._parse_json(raw)
-        extraction = self._compute_bboxes(pdf_path, extraction)
+        extraction = self._compute_bboxes(pdf_path, extraction, run_id)
 
         duration = time.time() - start
         return ExtractionResult(pdf_path=pdf_path, extraction=extraction, duration_seconds=duration)
+
+    def _save_raw_response(self, run_id: str, kind: str, raw_text: str) -> None:
+        """Save the exact, pre-parsed Gemini response text -- so a future
+        anomaly (a null value despite correct evidence, an unexpected
+        response shape, etc.) can be diagnosed by reading exactly what the
+        model said, instead of trying to reproduce it after the fact (which
+        doesn't reliably work, since a fresh call can come back differently)."""
+        try:
+            out_path = self.config.raw_responses_dir / f"{run_id}_{kind}.txt"
+            out_path.write_text(raw_text, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not save raw response for %s/%s: %s", run_id, kind, exc)
 
     # ------------------------------------------------------------------
     # Gemini upload
@@ -176,8 +195,9 @@ class Extractor:
         a top-level "confidence" key.
 
         The prompt asks for one JSON object shaped that way, but cheaper
-        models are inconsistent in practice — two distinct malformed shapes
-        observed across the first two live test runs on gemini-2.5-flash-lite:
+        models are inconsistent in practice — three distinct malformed shapes
+        observed across live test runs on gemini-2.5-flash-lite /
+        gemini-3.5-flash-lite:
 
           1. Two fenced blocks: the value object, then a separate
              `{"confidence": {...}}` object.
@@ -185,6 +205,15 @@ class Extractor:
              the same schema shape with each leaf's plain value replaced by
              a `{confidence, evidence_text, page}` dict — no "confidence"
              wrapper key at all.
+          3. ONE object, but the real value fields are nested one level too
+             deep under an extra, unrequested `"values"` key alongside
+             `"confidence"` -- e.g. `{"values": {"agreement_parties": ...},
+             "confidence": {...}}` instead of `agreement_parties` sitting
+             directly at the top level. Diagnosed via a saved raw response
+             where this caused every value to silently resolve to null
+             (Reviewer's tree-walk expects value keys at the top level to
+             match the confidence tree's structure) despite the confidence
+             block itself being completely correct.
 
         A naive `dict.update()` merge across all top-level objects handles
         case 1 correctly but silently destroys the real values in case 2
@@ -193,7 +222,8 @@ class Extractor:
         response, classify each one as a "confidence tree" (every leaf is a
         confidence-shaped dict, no plain scalar values anywhere) or a "value
         object" (has at least one real scalar leaf), and combine accordingly
-        instead of blindly overwriting.
+        instead of blindly overwriting. Then unwrap a stray "values" wrapper
+        (case 3) if the merge produced one instead of real top-level keys.
         """
         cleaned = re.sub(r"```(?:json)?", "", text).strip()
 
@@ -227,6 +257,18 @@ class Extractor:
             else:
                 merged.update(obj)
 
+        # Case 3: unwrap a stray "values" key. "values" is never a real
+        # taxonomy field name in this tool's schema, so if the model added
+        # one as an extra wrapper around the actual fields, lift its
+        # contents up to the top level instead of leaving them nested one
+        # level too deep (where the Reviewer's tree-walk would never find
+        # them, since it expects value keys to mirror the confidence tree's
+        # top-level structure).
+        if isinstance(merged.get("values"), dict):
+            wrapped = merged.pop("values")
+            for key, value in wrapped.items():
+                merged.setdefault(key, value)
+
         if confidence_tree is not None:
             merged["confidence"] = confidence_tree
         return merged
@@ -253,7 +295,7 @@ class Extractor:
     # for a schema with no arrays (no usage_info-style special-casing needed).
     # ------------------------------------------------------------------
 
-    def _compute_bboxes(self, pdf_path: Path, response: Dict[str, Any]) -> Dict[str, Any]:
+    def _compute_bboxes(self, pdf_path: Path, response: Dict[str, Any], run_id: str) -> Dict[str, Any]:
         if not PYMUPDF_AVAILABLE:
             logger.warning("PyMuPDF not installed; skipping bbox verification, alignment_status will be absent")
             return response
@@ -284,7 +326,7 @@ class Extractor:
                 page = doc[page_num - 1]
                 try:
                     img_bytes = self._render_page(page)
-                    boxes = self._call_bbox_gemini_with_retry(img_bytes, items, page_num, pdf_path)
+                    boxes = self._call_bbox_gemini_with_retry(img_bytes, items, page_num, pdf_path, run_id)
                 except Exception as exc:
                     # Only reached after retries are exhausted. Marking NO_MATCH
                     # here is a fallback, not a genuine "checked and it's not
@@ -345,6 +387,7 @@ class Extractor:
         items: List[Tuple[str, str, Dict[str, Any]]],
         page_num: int,
         pdf_path: Path,
+        run_id: str,
         max_attempts: int = 3,
     ) -> List[Dict[str, Any]]:
         """Retry the bbox call on transient failures (network hiccups, rate
@@ -357,7 +400,7 @@ class Extractor:
         last_exc: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return self._call_bbox_gemini(img_bytes, items)
+                return self._call_bbox_gemini(img_bytes, items, run_id, page_num, attempt)
             except Exception as exc:  # noqa: BLE001 -- retry on anything, let the caller's handler log the final one
                 last_exc = exc
                 if attempt < max_attempts:
@@ -368,7 +411,14 @@ class Extractor:
                     time.sleep(1.5 * attempt)
         raise last_exc  # type: ignore[misc]
 
-    def _call_bbox_gemini(self, img_bytes: bytes, items: List[Tuple[str, str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _call_bbox_gemini(
+        self,
+        img_bytes: bytes,
+        items: List[Tuple[str, str, Dict[str, Any]]],
+        run_id: Optional[str] = None,
+        page_num: Optional[int] = None,
+        attempt: int = 1,
+    ) -> List[Dict[str, Any]]:
         items_payload = [{"label": label, "evidence_text": ev} for label, ev, _ in items]
         prompt = _BBOX_PROMPT.replace("__ITEMS__", json.dumps(items_payload, ensure_ascii=False, indent=2))
 
@@ -378,6 +428,8 @@ class Extractor:
             config=types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"),
         )
         raw = resp.text or ""
+        if run_id is not None:
+            self._save_raw_response(run_id, f"bbox_page{page_num}_attempt{attempt}", raw)
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)

@@ -94,8 +94,14 @@ class PipelineConfig:
     # Every run's final tagged XBRL-shaped output, one file per extraction —
     # previously only printed to stdout and not persisted anywhere.
     extractions_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "extractions")
+    # Raw, pre-parsed Gemini response text for every extraction and bbox call
+    # -- added after a case where extracted_value came back null despite
+    # correct evidence_text, and there was no way to inspect what the model
+    # actually said, since only the final merged/parsed result gets logged.
+    raw_responses_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "raw_responses")
 
     def __post_init__(self) -> None:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_dir.mkdir(parents=True, exist_ok=True)
         self.extractions_dir.mkdir(parents=True, exist_ok=True)
+        self.raw_responses_dir.mkdir(parents=True, exist_ok=True)
