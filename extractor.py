@@ -349,8 +349,8 @@ class Extractor:
                     if leaf is None:
                         continue
                     matched.add(label)
-                    box_2d = box_entry.get("box_2d")
-                    if not isinstance(box_2d, list) or len(box_2d) != 4:
+                    box_2d = self._normalize_box_2d(box_entry.get("box_2d"))
+                    if box_2d is None:
                         leaf["alignment_status"] = "NO_MATCH"
                         continue
                     leaf["alignment_status"] = "EXACT"
@@ -361,6 +361,24 @@ class Extractor:
             doc.close()
 
         return response
+
+    @staticmethod
+    def _normalize_box_2d(box_2d: Any) -> Optional[List[float]]:
+        """Accept both the requested flat shape `[ymin, xmin, ymax, xmax]` and
+        an extra-nested variant `[[ymin, xmin, ymax, xmax]]` the model has
+        been observed to emit (a list of length 1 wrapping the real 4-number
+        box) -- found via a saved raw bbox response where every field had a
+        genuinely correct box, but the strict `len(box_2d) != 4` check
+        rejected all of them as NO_MATCH because of the extra wrapping list.
+        Returns None if the shape can't be normalized into 4 numbers.
+        """
+        if not isinstance(box_2d, list):
+            return None
+        if len(box_2d) == 4 and all(isinstance(v, (int, float)) for v in box_2d):
+            return box_2d
+        if len(box_2d) == 1 and isinstance(box_2d[0], list) and len(box_2d[0]) == 4:
+            return box_2d[0]
+        return None
 
     @staticmethod
     def _walk_confidence(conf_node: Any, prefix: str = ""):
