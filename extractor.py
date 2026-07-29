@@ -451,8 +451,33 @@ class Extractor:
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
-        parsed = json.loads(raw)
+        parsed = self._parse_bbox_json(raw)
         boxes = parsed.get("boxes")
         if not isinstance(boxes, list):
             raise ExtractorError(f"Gemini bbox response missing 'boxes' array: {parsed}")
         return boxes
+
+    @staticmethod
+    def _parse_bbox_json(raw: str) -> Dict[str, Any]:
+        """Parse the bbox response, with a repair fallback for a specific
+        malformed shape observed to be DETERMINISTIC (same document produces
+        the identical invalid JSON on every retry, so retrying alone can't
+        fix it): the model leaves a stray extra "}" immediately after a
+        box_2d array closes, e.g.
+
+            "box_2d": [
+                234, 217, 246, 456]
+              }
+            },
+
+        -- one closing brace too many, as if it started writing a nested
+        [[...]] structure (a different but related malformation we've also
+        seen) and left a dangling brace behind. If the first parse fails,
+        collapse that specific redundant-brace pattern and retry once
+        before giving up.
+        """
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            repaired = re.sub(r"(\][ \t]*\n[ \t]*)\}([ \t]*\n[ \t]*\})", r"\1\2", raw)
+            return json.loads(repaired)
