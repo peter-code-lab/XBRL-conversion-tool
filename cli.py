@@ -27,6 +27,7 @@ from prompt_writer import apply_prompt_update
 from reviewer import Reviewer
 from summarizer import Summarizer
 from taxonomy_tagger import TaxonomyTagger
+from xbrl_serializer import XBRLSerializer
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("cli")
@@ -67,6 +68,10 @@ def cmd_run(args: argparse.Namespace, config: PipelineConfig) -> None:
     out_path = config.extractions_dir / f"{ts}_{pdf_path.stem}.json"
     out_path.write_text(json.dumps(tagged_dict, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     print(f"\nExtraction saved: {out_path}", file=sys.stderr)
+
+    xbrl_path = config.xbrl_dir / f"{ts}_{pdf_path.stem}.xml"
+    XBRLSerializer(config.taxonomy_path).write(tagged, xbrl_path)
+    print(f"XBRL saved: {xbrl_path}", file=sys.stderr)
 
     flagged = review.flag_worthy()
     if flagged:

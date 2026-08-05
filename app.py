@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_from_directory
 
 import review_log
 from ai_reviewer import AIReviewer
@@ -27,6 +27,7 @@ from extractor import Extractor, ExtractorError
 from reviewer import Reviewer
 from summarizer import Summarizer
 from taxonomy_tagger import TaxonomyTagger
+from xbrl_serializer import XBRLSerializer
 
 app = Flask(__name__)
 config = PipelineConfig()
@@ -130,6 +131,13 @@ PAGE = """
     <h2>Self-correction loop status</h2>
     <div id="loopStatus"></div>
 
+    <h2>XBRL Output</h2>
+    <div id="xbrlLink"></div>
+    <details>
+      <summary>XBRL XML</summary>
+      <pre id="xbrlOutput"></pre>
+    </details>
+
     <details>
       <summary>Raw JSON</summary>
       <pre id="output"></pre>
@@ -145,6 +153,8 @@ const output = document.getElementById('output');
 const fieldsBody = document.querySelector('#fieldsTable tbody');
 const criticSection = document.getElementById('criticSection');
 const loopStatus = document.getElementById('loopStatus');
+const xbrlLink = document.getElementById('xbrlLink');
+const xbrlOutput = document.getElementById('xbrlOutput');
 
 drop.addEventListener('click', () => fileInput.click());
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('hover'); });
@@ -245,6 +255,8 @@ async function handleFile(file) {
     renderFields(data.judgments);
     renderCritic(data.judgments, data.critic_triggered);
     renderLoopStatus(data.loop_status);
+    xbrlLink.innerHTML = `<a href="${data.xbrl_url}" target="_blank" download>Download ${data.xbrl_filename}</a>`;
+    xbrlOutput.textContent = data.xbrl_xml;
     output.textContent = JSON.stringify(data, null, 2);
     results.style.display = 'block';
   } catch (err) {
@@ -261,6 +273,11 @@ async function handleFile(file) {
 @app.route("/")
 def index():
     return render_template_string(PAGE)
+
+
+@app.route("/xbrl/<path:filename>")
+def serve_xbrl(filename):
+    return send_from_directory(config.xbrl_dir, filename, mimetype="application/xml")
 
 
 @app.route("/extract", methods=["POST"])
@@ -314,6 +331,9 @@ def extract():
         out_path = config.extractions_dir / f"{ts}_{pdf_path.stem}.json"
         out_path.write_text(json.dumps(tagged_dict, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
+        xbrl_path = config.xbrl_dir / f"{ts}_{pdf_path.stem}.xml"
+        XBRLSerializer(config.taxonomy_path).write(tagged, xbrl_path)
+
         ai_review_by_field = {}
         if ai_reviews:
             for r in ai_reviews:
@@ -352,6 +372,10 @@ def extract():
         "critic_triggered": critic_triggered,
         "loop_status": loop_status,
         "saved_to": str(out_path),
+        "xbrl_saved_to": str(xbrl_path),
+        "xbrl_filename": xbrl_path.name,
+        "xbrl_url": f"/xbrl/{xbrl_path.name}",
+        "xbrl_xml": xbrl_path.read_text(encoding="utf-8"),
     })
 
 

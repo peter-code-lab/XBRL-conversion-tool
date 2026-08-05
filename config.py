@@ -99,9 +99,13 @@ class PipelineConfig:
     # correct evidence_text, and there was no way to inspect what the model
     # actually said, since only the final merged/parsed result gets logged.
     raw_responses_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "raw_responses")
+    # Real XBRL instance XML documents, one per extraction, sibling to the
+    # JSON-shaped file in extractions_dir.
+    xbrl_dir: Path = field(default_factory=lambda: _project_root() / "runs" / "xbrl")
 
     def __post_init__(self) -> None:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_dir.mkdir(parents=True, exist_ok=True)
         self.extractions_dir.mkdir(parents=True, exist_ok=True)
         self.raw_responses_dir.mkdir(parents=True, exist_ok=True)
+        self.xbrl_dir.mkdir(parents=True, exist_ok=True)
