@@ -50,16 +50,26 @@ class Summarizer:
     def __init__(self, config: PipelineConfig):
         self.config = config
 
+    @staticmethod
+    def _doc_key(entry: Dict) -> str:
+        return entry.get("pdf") or entry.get("document_id") or ""
+
     def aggregate(self) -> SummaryReport:
         entries = review_log.read_all_list(self.config.review_log_path)
-        n_files_total = len(entries)
+        # The log is append-only, so re-running a PDF appends another line and a
+        # line count over-counts documents. Both flag numerators below dedupe by
+        # document, so the denominator has to as well -- otherwise re-running the
+        # same file deflates every flag rate and pushes real signal back under
+        # rate_threshold. (Observed: 109 lines over 58 distinct PDFs, one file run
+        # 11x, which roughly halved every rate in the report.)
+        n_files_total = len({self._doc_key(e) for e in entries})
 
         flagged_docs: Dict[Tuple[str, str], set] = defaultdict(set)
         sample_evidence: Dict[Tuple[str, str], List[str]] = defaultdict(list)
         sample_values: Dict[Tuple[str, str], List[str]] = defaultdict(list)
 
         for entry in entries:
-            doc = entry.get("pdf") or entry.get("document_id") or ""
+            doc = self._doc_key(entry)
             seen_in_doc = set()
             for j in entry.get("judgments", []):
                 judgment = j.get("judgment")
@@ -107,7 +117,7 @@ class Summarizer:
         issue_counts: Dict[str, Counter] = defaultdict(Counter)
 
         for entry in entries:
-            doc = entry.get("pdf") or entry.get("document_id") or ""
+            doc = self._doc_key(entry)
             seen_in_doc = set()
             for j in entry.get("judgments", []):
                 ai = j.get("ai_review") if isinstance(j, dict) else None

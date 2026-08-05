@@ -3,9 +3,10 @@ document (xbrli:xbrl), instead of the JSON intermediate TaxonomyTagger writes.
 
 Scoped to a PoC: targets the bespoke, non-standard taxonomy in
 taxonomy/construction_payment_taxonomy.json, not a published XBRL taxonomy
-standard. There is no .xsd for this taxonomy yet, so the schemaRef below is a
-placeholder filename, and the output is well-formed XBRL-shaped XML rather
-than a document validated against a real schema. No multi-context/dimensions/
+standard. The schemaRef below resolves to a real generated .xsd (see
+taxonomy/generate_taxonomy_artifacts.py), but the output has not been run
+through Arelle or any other XBRL processor, so treat it as well-formed and
+correctly shaped rather than certified conformant. No multi-context/dimensions/
 footnotes support -- one shared context and unit are enough for 4 concepts.
 """
 
