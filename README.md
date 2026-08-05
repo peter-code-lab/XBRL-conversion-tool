@@ -112,15 +112,6 @@ python cli.py apply --new-prompt path/to/reviewed_candidate.txt
 - **XBRL output**: a real `xbrli:xbrl` instance document with a `schemaRef` to the generated schema, one shared context and unit, and `contextRef`/`unitRef`/`decimals` on each fact. It has **not** been validated with Arelle or any other XBRL processor, the entity identifier scheme is a placeholder rather than a real EIN/CIK, and there is no support for multiple contexts, dimensions, or footnotes. Well-formed and correctly shaped, not certified conformant.
 - **Self-correction loop**: fully implemented and generic, but has never fired. See below.
 
-## Known limitations in the quality signal
-
-Worth understanding before trusting the flags or tuning the loop. Measured over the current review log (58 distinct documents):
-
-- **The confidence axis is inert.** Of 432 logged confidence values, 425 are ≥ 0.9 (312 of them exactly 1.0), despite the prompt explicitly asking the model not to cluster at the extremes. Nothing has ever fallen below `tau_low = 0.5`, so the `low-confidence` judgment has never been produced. In practice the bbox alignment status is the *only* axis doing work.
-- **The one live signal is mostly false positives.** Of the `NO_MATCH` flags the AI critic examined, it returned `actually_correct` on 32 of 35 and a genuine error on 3. Treat `verified-suspicious` as "worth a look", not "wrong".
-- **Infrastructure failure is indistinguishable from a finding.** When the bbox retry exhausts (3 attempts), that page's fields are marked `NO_MATCH`, which the reviewer reads as `verified-suspicious`. An API timeout and a real extraction error produce identical data.
-- **`rate_threshold = 0.6` is unreachable.** The highest observed per-field flag rate is 21%. No signal has ever crossed the gate, so `runs/candidates/` is empty and `apply` has never run. Lowering this threshold before improving flag precision would feed mostly-false-positive signal into a Gemini call that rewrites the extraction prompt.
-- **Document identity is inconsistent across entry points.** `app.py` logs a bare uploaded filename while `cli.py` logs a full path, so the same PDF processed both ways counts as two documents in the summarizer's denominator.
 
 ## What's adapted from `Self_Improving_Pipeline`, and what's new
 
